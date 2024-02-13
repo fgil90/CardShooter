@@ -1,3 +1,8 @@
+.vscode
+main.code-workspace
+Makefile
+Makefile.Android
+
 # Prerequisites
 *.d
 
