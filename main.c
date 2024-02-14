@@ -1,3 +1,10 @@
+
+//----------------------------------------------------------------------------------
+// IDEAS:
+// - [ ] Throw curved cards
+// - [ ] Different Types of cards
+// - [ ] Cycle card types with Q and E
+
 #include "raylib.h"
 #include <stdbool.h>
 
@@ -7,6 +14,8 @@
 #define MAX_CARDS 100
 #define CARD_SPEED_MULT 1/25.0f
 #define PLAYER_SIZE 64
+#define CARD_SIZE 16
+#define ZERO_VECTOR {0.0f, 0.0f}
 
 #if defined(PLATFORM_WEB)
 #include <emscripten/emscripten.h>
@@ -20,8 +29,12 @@ float logic_fps = 60.0f;
 
 Color bgColor = WHITE;
 Vector2 playerSize = {(float)PLAYER_SIZE, (float)PLAYER_SIZE};
-Vector2 cardSize = {16.0f, 16.0f};
+Vector2 cardSize = {(float)CARD_SIZE, (float)CARD_SIZE};
 Color cardColor = RED;
+
+//----------------------------------------------------------------------------------
+// Player Definition
+//----------------------------------------------------------------------------------
 
 typedef struct Player
 {
@@ -29,12 +42,25 @@ typedef struct Player
     Vector2 center;
     float speed;
     Color color;
-    bool isMoving;
-    bool isAttacking;
+    bool isMoving; // currently unused
 } PLAYER;
 
-typedef struct Card
-{
+// Player Declaration
+//----------------------------------------------------------------------------------
+
+PLAYER player = {
+    .pos = ZERO_VECTOR,
+    .center = (Vector2){(float)(PLAYER_SIZE/2), (float)(PLAYER_SIZE/2)},
+    .speed = 5.0f,
+    .color = BLACK,
+    .isMoving = false,
+};
+
+//----------------------------------------------------------------------------------
+
+//----------------------------------------------------------------------------------
+
+typedef struct Card{
     Vector2 pos;
     Vector2 center;
     Vector2 speed;
@@ -43,25 +69,42 @@ typedef struct Card
     bool isAlive;
 } CARD;
 
+// Card Array Declaration
+//----------------------------------------------------------------------------------
 CARD cardArray[MAX_CARDS];
-int currentCardIdx = 0;
 
-PLAYER player = {
-    .pos = (Vector2){0.0f, 0.0f},
-    .center = (Vector2){(float)(PLAYER_SIZE/2), (float)(PLAYER_SIZE/2)},
-    .speed = 5.0f,
-    .color = BLACK,
-    .isMoving = false,
-    .isAttacking = false
-};
+//----------------------------------------------------------------------------------
+// CardHandler Definition
+//----------------------------------------------------------------------------------
+typedef struct CardHandler
+{
+    Vector2 initialMousePos;
+    float shotTimeAccumulator;
+    int currentCardIdx;
+    bool isShooting;
+} CARD_HANDLER;
+
+// CardHandler Declaration
+//----------------------------------------------------------------------------------
+CARD_HANDLER cardHandler = {
+    .initialMousePos = ZERO_VECTOR,
+    .shotTimeAccumulator = 0.0f,
+    .currentCardIdx = 0,
+    .isShooting = false
+    };
 
 //----------------------------------------------------------------------------------
 // Local Functions Declaration
 //----------------------------------------------------------------------------------
 
-void UpdatePlayer(PLAYER *p);
+// Player Functions
+//----------------------------------------------------------------------------------
+void UpdatePlayer(PLAYER * p);
 void DrawPlayer(const PLAYER *p);
-void CardThrowHandler(Vector2 *initialMousePos, float *shotTimeAccumulator, bool *isShooting);
+
+// Card Functions
+//----------------------------------------------------------------------------------
+void HandleCardThrow(CARD_HANDLER *ch);
 void ThrowCard(Vector2 origin, Vector2 speed, CARD *cardArray, int *currentCardIdx);
 void MoveCard(CARD *c);
 void RotateCard(CARD *c);
@@ -78,10 +121,7 @@ int main()
     //--------------------------------------------------------------------------------------
 
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Zeldinha de Carta");
-    bool isShooting = false;
-    float shotTimeAccumulator = 0.0f;
-    Vector2 initialMousePos = {0.0f, 0.0f};
-
+    
     //--------------------------------------------------------------------------------------
 
 #if defined(PLATFORM_WEB)
@@ -94,11 +134,15 @@ int main()
     while (!WindowShouldClose()) // Detect window close button or ESC key
     {
         // Logic
+        //--------------------------------------------------------------------------------------
+
         UpdatePlayer(&player);
-        CardThrowHandler(&initialMousePos, &shotTimeAccumulator, &isShooting);
+        HandleCardThrow(&cardHandler);
         UpdateCards(cardArray, MAX_CARDS);
 
         // Draw
+        //--------------------------------------------------------------------------------------
+
         BeginDrawing();
 
         ClearBackground(bgColor);
@@ -106,6 +150,8 @@ int main()
         DrawPlayer(&player);
 
         EndDrawing();
+        
+        //--------------------------------------------------------------------------------------
     }
 #endif
     // De-Initialization
@@ -174,25 +220,25 @@ void RotateCard(CARD *c){
     c->rotationSpeed *= 0.95f;
 }
 
-void CardThrowHandler(Vector2 *initialMousePos, float *shotTimeAccumulator, bool *isShooting)
+void HandleCardThrow(CARD_HANDLER *ch)
 {
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
     {
-        *isShooting = true;
-        *initialMousePos = GetMousePosition();
+        ch->isShooting = true;
+        ch->initialMousePos = GetMousePosition();
     }
 
-    if (isShooting)
-        *shotTimeAccumulator += GetFrameTime();
+    if (ch->isShooting)
+        ch->shotTimeAccumulator += GetFrameTime();
 
     if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT))
     {
-        Vector2 cardSpeed = {CARD_SPEED_MULT * (GetMousePosition().x - initialMousePos->x) / *shotTimeAccumulator,
-                             CARD_SPEED_MULT * (GetMousePosition().y - initialMousePos->y) / *shotTimeAccumulator};
+        Vector2 cardSpeed = {CARD_SPEED_MULT * (GetMousePosition().x - ch->initialMousePos.x) / ch->shotTimeAccumulator,
+                             CARD_SPEED_MULT * (GetMousePosition().y - ch->initialMousePos.y) / ch->shotTimeAccumulator};
         Vector2 playerCenter = {player.pos.x + player.center.x, player.pos.y + player.center.y};
-        ThrowCard(playerCenter, cardSpeed, cardArray, &currentCardIdx);
-        *shotTimeAccumulator = 0.0f;
-        *isShooting = false;
+        ThrowCard(playerCenter, cardSpeed, cardArray, &ch->currentCardIdx);
+        ch->shotTimeAccumulator = 0.0f;
+        ch->isShooting = false;
     }
 }
 
