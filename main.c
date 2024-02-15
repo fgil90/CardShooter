@@ -1,6 +1,8 @@
 
 //----------------------------------------------------------------------------------
-// IDEAS:
+// TODO:
+// - [x] Camera
+// - [ ] Enemies
 // - [ ] Throw curved cards
 // - [ ] Different Types of cards
 // - [ ] Cycle card types with Q and E
@@ -11,25 +13,31 @@
 #define SCREEN_WIDTH 800
 #define SCREEN_HEIGHT 800
 #define DRAW_FPS 60
+
+#define ZERO_VECTOR {0.0f, 0.0f}
+#define SCREEN_CENTER {(float)SCREEN_WIDTH/2, (float)SCREEN_HEIGHT/2}
+
 #define MAX_CARDS 100
-#define CARD_SPEED_MULT 1/25.0f
+#define MAX_ENEMIES 100
+
 #define PLAYER_SIZE 64
 #define CARD_SIZE 16
-#define ZERO_VECTOR {0.0f, 0.0f}
+#define CARD_SPEED_MULT 1/25.0f
 
 #if defined(PLATFORM_WEB)
 #include <emscripten/emscripten.h>
 #endif
 
 //----------------------------------------------------------------------------------
-// Local Variables Definition (local to this module)
+// Variables Definition
 //----------------------------------------------------------------------------------
-
-float logic_fps = 60.0f;
 
 Color bgColor = WHITE;
 Vector2 playerSize = {(float)PLAYER_SIZE, (float)PLAYER_SIZE};
-Vector2 cardSize = {(float)CARD_SIZE, (float)CARD_SIZE};
+
+
+// THIS WILL BECOME OBSOLETE AFTER I HAVE DIFFERENT TYPES OF CARDS
+Vector2 cardSize = {(float)CARD_SIZE, (float)CARD_SIZE}; 
 Color cardColor = RED;
 
 //----------------------------------------------------------------------------------
@@ -45,9 +53,6 @@ typedef struct Player
     bool isMoving; // currently unused
 } PLAYER;
 
-// Player Declaration
-//----------------------------------------------------------------------------------
-
 PLAYER player = {
     .pos = ZERO_VECTOR,
     .center = (Vector2){(float)(PLAYER_SIZE/2), (float)(PLAYER_SIZE/2)},
@@ -57,7 +62,7 @@ PLAYER player = {
 };
 
 //----------------------------------------------------------------------------------
-
+// Card Definition
 //----------------------------------------------------------------------------------
 
 typedef struct Card{
@@ -69,29 +74,38 @@ typedef struct Card{
     bool isAlive;
 } CARD;
 
-// Card Array Declaration
-//----------------------------------------------------------------------------------
-CARD cardArray[MAX_CARDS];
-
 //----------------------------------------------------------------------------------
 // CardHandler Definition
 //----------------------------------------------------------------------------------
-typedef struct CardHandler
-{
+typedef struct CardHandler{
+    CARD cardArray[MAX_CARDS];
     Vector2 initialMousePos;
     float shotTimeAccumulator;
     int currentCardIdx;
     bool isShooting;
 } CARD_HANDLER;
 
-// CardHandler Declaration
-//----------------------------------------------------------------------------------
 CARD_HANDLER cardHandler = {
     .initialMousePos = ZERO_VECTOR,
     .shotTimeAccumulator = 0.0f,
     .currentCardIdx = 0,
     .isShooting = false
     };
+
+//----------------------------------------------------------------------------------
+// Enemy Definition
+//----------------------------------------------------------------------------------
+
+typedef struct Enemy{
+    Vector2 pos;
+    Vector2 speed;
+    int hp;
+    int damage;
+} ENEMY;
+
+typedef struct EnemyHandler{
+    ENEMY enemyArray[MAX_ENEMIES];
+} ENEMY_HANDLER;
 
 //----------------------------------------------------------------------------------
 // Local Functions Declaration
@@ -105,11 +119,11 @@ void DrawPlayer(const PLAYER *p);
 // Card Functions
 //----------------------------------------------------------------------------------
 void HandleCardThrow(CARD_HANDLER *ch);
-void ThrowCard(Vector2 origin, Vector2 speed, CARD *cardArray, int *currentCardIdx);
+void ThrowCard(Vector2 origin, Vector2 speed, CARD_HANDLER *ch);
 void MoveCard(CARD *c);
 void RotateCard(CARD *c);
-void UpdateCards(CARD *cardArray, int n_cards);
-void DrawCards(const CARD *cardArray, int n_cards);
+void UpdateCards(CARD_HANDLER *ch);
+void DrawCards(CARD_HANDLER *ch);
 
 //----------------------------------------------------------------------------------
 // Main entry point
@@ -122,6 +136,13 @@ int main()
 
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Zeldinha de Carta");
     
+    // Camera
+    Camera2D camera = {
+        .offset = SCREEN_CENTER,
+        .target = (Vector2){player.pos.x + PLAYER_SIZE / 2, player.pos.y + PLAYER_SIZE / 2},
+        .rotation = 0.0f,
+        .zoom = 1.0f};
+
     //--------------------------------------------------------------------------------------
 
 #if defined(PLATFORM_WEB)
@@ -138,17 +159,19 @@ int main()
 
         UpdatePlayer(&player);
         HandleCardThrow(&cardHandler);
-        UpdateCards(cardArray, MAX_CARDS);
+        UpdateCards(&cardHandler);
+        camera.target = (Vector2){player.pos.x + PLAYER_SIZE / 2, player.pos.y + PLAYER_SIZE / 2};
 
         // Draw
         //--------------------------------------------------------------------------------------
-
         BeginDrawing();
+        BeginMode2D(camera);
 
         ClearBackground(bgColor);
-        DrawCards(cardArray, MAX_CARDS);
+        DrawCards(&cardHandler);
         DrawPlayer(&player);
 
+        EndMode2D();
         EndDrawing();
         
         //--------------------------------------------------------------------------------------
@@ -167,17 +190,17 @@ void DrawPlayer(const PLAYER *p)
     return;
 }
 
-void DrawCards(const CARD *cardArray, int n_cards)
+void DrawCards(CARD_HANDLER *ch)
 {
-    for (int i = 0; i < n_cards; i++){
-        if (!cardArray[i].isAlive)
+    for (int i = 0; i < MAX_CARDS; i++){
+        if (!ch->cardArray[i].isAlive)
             continue;
 
-        Rectangle rect = {cardArray[i].pos.x,
-                          cardArray[i].pos.y,
+        Rectangle rect = {ch->cardArray[i].pos.x,
+                          ch->cardArray[i].pos.y,
                           cardSize.x,
                           cardSize.y};
-        DrawRectanglePro(rect, cardArray[i].center, cardArray[i].rotation, cardColor);
+        DrawRectanglePro(rect, ch->cardArray[i].center, ch->cardArray[i].rotation, cardColor);
     }
     return;
 }
@@ -197,10 +220,10 @@ void UpdatePlayer(PLAYER *p)
     return;
 }
 
-void UpdateCards(CARD *cardArray, int n_cards){
-    for (int i = 0; i < n_cards; i++)
+void UpdateCards(CARD_HANDLER *ch){
+    for (int i = 0; i < MAX_CARDS; i++)
     {
-        CARD *c = &cardArray[i];
+        CARD *c = &ch->cardArray[i];
         if (!c->isAlive) continue;
 
         MoveCard(c);
@@ -236,14 +259,14 @@ void HandleCardThrow(CARD_HANDLER *ch)
         Vector2 cardSpeed = {CARD_SPEED_MULT * (GetMousePosition().x - ch->initialMousePos.x) / ch->shotTimeAccumulator,
                              CARD_SPEED_MULT * (GetMousePosition().y - ch->initialMousePos.y) / ch->shotTimeAccumulator};
         Vector2 playerCenter = {player.pos.x + player.center.x, player.pos.y + player.center.y};
-        ThrowCard(playerCenter, cardSpeed, cardArray, &ch->currentCardIdx);
+        ThrowCard(playerCenter, cardSpeed, ch);
         ch->shotTimeAccumulator = 0.0f;
         ch->isShooting = false;
     }
 }
 
-void ThrowCard(Vector2 origin, Vector2 speed, CARD *cardArray, int *currentCardIdx){
-    cardArray[*currentCardIdx] = (CARD){
+void ThrowCard(Vector2 origin, Vector2 speed, CARD_HANDLER *ch){
+    ch->cardArray[ch->currentCardIdx] = (CARD){
         .pos = origin,
         .center = (Vector2){cardSize.x / 2, cardSize.y / 2},
         .speed = speed,
@@ -252,6 +275,6 @@ void ThrowCard(Vector2 origin, Vector2 speed, CARD *cardArray, int *currentCardI
         .isAlive = true
     };
 
-    *currentCardIdx += 1;
-    *currentCardIdx %= MAX_CARDS;
+    ch->currentCardIdx += 1;
+    ch->currentCardIdx %= MAX_CARDS;
 }
