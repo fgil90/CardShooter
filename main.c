@@ -10,6 +10,7 @@
 #include "raylib.h"
 #include "raymath.h"
 #include <stdbool.h>
+#include <stdio.h>
 
 #define SCREEN_WIDTH 800
 #define SCREEN_HEIGHT 800
@@ -17,8 +18,8 @@
 #define LOGIC_FPS 60
 #define LOGIC_FRAME_TIME 1.0/(float)LOGIC_FPS
 
-#define ZERO_VECTOR {0.0f, 0.0f}
 #define SCREEN_CENTER {(float)SCREEN_WIDTH/2, (float)SCREEN_HEIGHT/2}
+#define ZERO_VECTOR {0.0f, 0.0f}
 
 #define MAX_CARDS 100
 #define MAX_ENEMIES 100
@@ -29,6 +30,8 @@
 #define CARD_SPEED_MULT 1/25.0f
 #define DMG_MULT 1
 #define SQRT2 1.41421356237
+
+#define DMG_UI_DURATION 2
 
 #if defined(PLATFORM_WEB)
     #include <emscripten/emscripten.h>
@@ -119,7 +122,9 @@ typedef struct Enemy{
     bool isAlive;
     int hp;
     int damage;
-    float t_iframes;
+    float iFrameTimer;
+    int lastDmg;
+    float dmgUITimer;
     
 } ENEMY;
 
@@ -153,7 +158,7 @@ void DrawPlayer(const PLAYER *p);
 // Card Functions
 //----------------------------------------------------------------------------------
 void HandleCardThrow(CARD_HANDLER *ch);
-void CreateCard(CARD *c, int cardType);
+void SpawnCard(CARD *c, int cardType);
 void ThrowCard(Vector2 origin, Vector2 speed, CARD_HANDLER *ch);
 void MoveCard(CARD *c);
 void RotateCard(CARD *c);
@@ -163,8 +168,9 @@ void DrawCards(CARD_HANDLER *ch);
 // Enemy Functions
 //----------------------------------------------------------------------------------
 void MoveEnemy(ENEMY *e, Vector2 target);
-void MoveEnemies(ENEMY_HANDLER *eh);
+void UpdateEnemies(ENEMY_HANDLER *eh);
 void DrawEnemies(ENEMY_HANDLER *eh);
+void DrawEnemyDamage(ENEMY_HANDLER *eh);
 void SpawnEnemy(ENEMY_HANDLER *eh);
 void SpawnEnemies(ENEMY_HANDLER *eh);
 
@@ -207,7 +213,7 @@ int main(){
         if(logicAcc>LOGIC_FRAME_TIME){
             UpdatePlayer(&player);
             UpdateCards(&cardHandler);
-            MoveEnemies(&enemyHandler);
+            UpdateEnemies(&enemyHandler);
             camera.target = (Vector2){player.pos.x + PLAYER_SIZE / 2, player.pos.y + PLAYER_SIZE / 2};
             logicAcc -= LOGIC_FRAME_TIME;
 
@@ -225,6 +231,7 @@ int main(){
         DrawCards(&cardHandler);
         DrawPlayer(&player);
         DrawEnemies(&enemyHandler);
+        DrawEnemyDamage(&enemyHandler);
         EndMode2D();
 
         // UI
@@ -302,7 +309,7 @@ void RotateCard(CARD *c){
     c->rotationSpeed *= 0.95f;
 }
 
-void CreateCard(CARD *c, int cardType){
+void SpawnCard(CARD *c, int cardType){
     switch (cardType)
     {
     case NORMAL:
@@ -311,6 +318,7 @@ void CreateCard(CARD *c, int cardType){
         c->size = (Vector2){CARD_SIZE, CARD_SIZE};
         c->color = RED;
         break;
+    // TODO: Add card types
     
     default:
         break;
@@ -320,7 +328,7 @@ void CreateCard(CARD *c, int cardType){
 
 void ThrowCard(Vector2 origin, Vector2 speed, CARD_HANDLER *ch){
     CARD *c = &ch->cardArray[ch->currentCardIdx];
-    CreateCard(c, NORMAL);
+    SpawnCard(c, NORMAL);
     c->pos = origin;
     c->speed = speed;
     c->rotation = (float)GetRandomValue(0, 360);
@@ -340,6 +348,23 @@ void DrawEnemies(ENEMY_HANDLER *eh){
     }
 }
 
+void DrawEnemyDamage(ENEMY_HANDLER *eh){
+    for (int i = 0; i < MAX_ENEMIES; i++)
+    {
+        ENEMY *e = &eh->enemyArray[i];
+        if (!e->isAlive) continue;
+        if (e->dmgUITimer > 0){
+            char sbuff[6];
+            sprintf(sbuff, "%d", e->lastDmg);
+            Vector2 offset = {0.0f, -30.0f};
+            Vector2 dmg_pos = Vector2Add(e->pos, offset);
+            DrawText(sbuff, (int)dmg_pos.x, (int)dmg_pos.y, 20, RED);
+            e->dmgUITimer -= GetFrameTime();
+        }
+    }
+    
+}
+
 void MoveEnemy(ENEMY *e, Vector2 target)
 {
     Vector2 player_center = Vector2Add(player.pos, player.center);
@@ -349,11 +374,14 @@ void MoveEnemy(ENEMY *e, Vector2 target)
     e->pos = Vector2Add(e->pos, e->curr_speed);
 }
 
-void MoveEnemies(ENEMY_HANDLER *eh){
+void UpdateEnemies(ENEMY_HANDLER *eh){
     for (int i = 0; i < MAX_ENEMIES; i++){
         ENEMY *enemy = &eh->enemyArray[i];
         if (!enemy->isAlive) continue;
-        
+        if (enemy->hp<0) {
+            enemy->isAlive = false;
+            continue;
+        }
         MoveEnemy(enemy, player.pos);
     }
 }
@@ -367,7 +395,10 @@ void SpawnEnemy(ENEMY_HANDLER *eh)
         .speed = GetRandomValue(1, eh->difficulty * 2),
         .hp = 100,
         .color = DARKPURPLE,
-        .isAlive = true};
+        .isAlive = true,
+        .iFrameTimer = 0,
+        .dmgUITimer = 0,
+        };
     eh->currentIndex++;
     eh->currentIndex %= MAX_ENEMIES;
 }
@@ -415,15 +446,22 @@ void CheckCardEnemyCollisions(CARD_HANDLER *ch, ENEMY_HANDLER *eh)
             if (!e->isAlive) continue;
 
             Rectangle enemy_rect = {e->pos.x, e->pos.y, e->size.x, e->size.y};
-
             Vector2 cardCenter = Vector2Add(c->center, c->pos);
-            bool isColliding = CheckCollisionCircleRec(cardCenter, c->size.x/2*SQRT2, enemy_rect);
-            if (isColliding){
-                c->isAlive = false;
-                int damage = (int)(Vector2Length(c->speed) * DMG_MULT);
-                e->hp -= damage;
-                return;
+            bool isColliding = CheckCollisionCircleRec(cardCenter, c->size.x/2*SQRT2, enemy_rect); // TODO: fix wrong radius
+            if (!isColliding) continue;
+
+            c->isAlive = false;
+            if (e->iFrameTimer>0){
+                e->iFrameTimer    -= GetFrameTime();
+                e->dmgUITimer -= GetFrameTime();
+                continue;
             }
+
+            int damage = (int)(Vector2Length(c->speed) * DMG_MULT);
+            e->hp -= damage;
+            e->lastDmg = damage;
+            e->dmgUITimer = DMG_UI_DURATION;
+            return; //TODO: Add piercing / Add Enemy iframes
         }
     }
 }
