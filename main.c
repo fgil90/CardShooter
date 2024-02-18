@@ -3,7 +3,7 @@
 // TODO:
 // - [x] Camera
 // - [x] Enemies
-// - [ ] Different Types of cards
+// - [x] Different Types of cards
 // - [ ] Cycle card types with Q and E
 // - [ ] Throw curved cards
 
@@ -13,7 +13,9 @@
 
 #define SCREEN_WIDTH 800
 #define SCREEN_HEIGHT 800
-#define DRAW_FPS 60
+#define DRAW_FPS 120
+#define LOGIC_FPS 60
+#define LOGIC_FRAME_TIME 1.0/(float)LOGIC_FPS
 
 #define ZERO_VECTOR {0.0f, 0.0f}
 #define SCREEN_CENTER {(float)SCREEN_WIDTH/2, (float)SCREEN_HEIGHT/2}
@@ -25,6 +27,7 @@
 #define PLAYER_SIZE 64
 #define CARD_SIZE 16
 #define CARD_SPEED_MULT 1/25.0f
+#define DMG_MULT 1
 #define SQRT2 1.41421356237
 
 #if defined(PLATFORM_WEB)
@@ -37,6 +40,7 @@
 
 Color bgColor = WHITE;
 Vector2 playerSize = {(float)PLAYER_SIZE, (float)PLAYER_SIZE};
+float logicAcc = 0.0f;
 
 //----------------------------------------------------------------------------------
 // Player Definition
@@ -63,16 +67,23 @@ PLAYER player = {
 // Card Definition
 //----------------------------------------------------------------------------------
 
+enum cardTypes{
+    NORMAL,
+    PIERCING,
+};
+
 typedef struct Card{
     Vector2 pos;
     Vector2 center;
     Vector2 speed;
+    int type;
     Vector2 size;
     Color color;
     float rotation;
     float rotationSpeed;
     bool isAlive;
     bool isMoving;
+    bool isPiercing;
 } CARD;
 
 //----------------------------------------------------------------------------------
@@ -82,8 +93,9 @@ typedef struct CardHandler{
     CARD cardArray[MAX_CARDS];
     Vector2 initialMousePos;
     float shotTimeAccumulator;
-    int currentCardIdx;
+    int selectedType;
     bool isShooting;
+    int currentCardIdx;
 } CARD_HANDLER;
 
 CARD_HANDLER cardHandler = {
@@ -141,6 +153,7 @@ void DrawPlayer(const PLAYER *p);
 // Card Functions
 //----------------------------------------------------------------------------------
 void HandleCardThrow(CARD_HANDLER *ch);
+void CreateCard(CARD *c, int cardType);
 void ThrowCard(Vector2 origin, Vector2 speed, CARD_HANDLER *ch);
 void MoveCard(CARD *c);
 void RotateCard(CARD *c);
@@ -150,15 +163,16 @@ void DrawCards(CARD_HANDLER *ch);
 // Enemy Functions
 //----------------------------------------------------------------------------------
 void MoveEnemy(ENEMY *e, Vector2 target);
+void MoveEnemies(ENEMY_HANDLER *eh);
 void DrawEnemies(ENEMY_HANDLER *eh);
-void UpdateEnemies(ENEMY_HANDLER *eh);
 void SpawnEnemy(ENEMY_HANDLER *eh);
+void SpawnEnemies(ENEMY_HANDLER *eh);
 
 void CheckCardEnemyCollisions(CARD_HANDLER *ch, ENEMY_HANDLER *eh);
 
-    //----------------------------------------------------------------------------------
-    // Main entry point
-    //----------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------
+// Main entry point
+//----------------------------------------------------------------------------------
 
 int main(){
     // Initialization
@@ -185,15 +199,22 @@ int main(){
     // Main game loop
     while (!WindowShouldClose()) // Detect window close button or ESC key
     {
+        
         // Logic
         //--------------------------------------------------------------------------------------
+        logicAcc += GetFrameTime();
 
-        UpdatePlayer(&player);
-        CheckCardEnemyCollisions(&cardHandler, &enemyHandler);
+        if(logicAcc>LOGIC_FRAME_TIME){
+            UpdatePlayer(&player);
+            UpdateCards(&cardHandler);
+            MoveEnemies(&enemyHandler);
+            camera.target = (Vector2){player.pos.x + PLAYER_SIZE / 2, player.pos.y + PLAYER_SIZE / 2};
+            logicAcc -= LOGIC_FRAME_TIME;
+
+        }
+        SpawnEnemies(&enemyHandler);
         HandleCardThrow(&cardHandler);
-        UpdateCards(&cardHandler);
-        UpdateEnemies(&enemyHandler);
-        camera.target = (Vector2){player.pos.x + PLAYER_SIZE / 2, player.pos.y + PLAYER_SIZE / 2};
+        CheckCardEnemyCollisions(&cardHandler, &enemyHandler);
 
         // Draw
         //--------------------------------------------------------------------------------------
@@ -204,11 +225,16 @@ int main(){
         DrawCards(&cardHandler);
         DrawPlayer(&player);
         DrawEnemies(&enemyHandler);
-
         EndMode2D();
-        EndDrawing();
-        
+
+        // UI
         //--------------------------------------------------------------------------------------
+        DrawFPS(20,20);
+        
+
+        //--------------------------------------------------------------------------------------
+        
+        EndDrawing();
     }
 #endif
     // De-Initialization
@@ -222,6 +248,21 @@ void DrawPlayer(const PLAYER *p){
     DrawRectangleV(p->pos, playerSize, p->color);
 }
 
+void UpdatePlayer(PLAYER *p)
+{
+    // Move Player
+    if (IsKeyDown(KEY_W))
+        p->pos.y -= p->speed;
+    if (IsKeyDown(KEY_S))
+        p->pos.y += p->speed;
+    if (IsKeyDown(KEY_A))
+        p->pos.x -= p->speed;
+    if (IsKeyDown(KEY_D))
+        p->pos.x += p->speed;
+
+    return;
+}
+
 void DrawCards(CARD_HANDLER *ch){
     for (int i = 0; i < MAX_CARDS; i++){
         CARD *c = &ch->cardArray[i];
@@ -233,20 +274,6 @@ void DrawCards(CARD_HANDLER *ch){
                           c->size.y};
         DrawRectanglePro(rect, c->center, c->rotation, c->color);
     }
-    return;
-}
-
-void UpdatePlayer(PLAYER *p){
-    // Move Player
-    if (IsKeyDown(KEY_W))
-        p->pos.y -= p->speed;
-    if (IsKeyDown(KEY_S))
-        p->pos.y += p->speed;
-    if (IsKeyDown(KEY_A))
-        p->pos.x -= p->speed;
-    if (IsKeyDown(KEY_D))
-        p->pos.x += p->speed;
-
     return;
 }
 
@@ -275,8 +302,89 @@ void RotateCard(CARD *c){
     c->rotationSpeed *= 0.95f;
 }
 
-void HandleCardThrow(CARD_HANDLER *ch)
+void CreateCard(CARD *c, int cardType){
+    switch (cardType)
+    {
+    case NORMAL:
+        c->center = (Vector2){CARD_SIZE / 2, CARD_SIZE / 2};
+        c->type = cardType;
+        c->size = (Vector2){CARD_SIZE, CARD_SIZE};
+        c->color = RED;
+        break;
+    
+    default:
+        break;
+    }
+    
+}
+
+void ThrowCard(Vector2 origin, Vector2 speed, CARD_HANDLER *ch){
+    CARD *c = &ch->cardArray[ch->currentCardIdx];
+    CreateCard(c, NORMAL);
+    c->pos = origin;
+    c->speed = speed;
+    c->rotation = (float)GetRandomValue(0, 360);
+    c->rotationSpeed = (float)GetRandomValue(30, 200);
+    c->isAlive = true;
+    c->isMoving = true;
+
+    ch->currentCardIdx += 1;
+    ch->currentCardIdx %= MAX_CARDS;
+}
+
+void DrawEnemies(ENEMY_HANDLER *eh){
+    for (int i = 0; i < MAX_ENEMIES; i++){
+        ENEMY *e = &eh->enemyArray[i];
+        if(e->isAlive)
+            DrawRectangleV(e->pos, e->size, e->color);
+    }
+}
+
+void MoveEnemy(ENEMY *e, Vector2 target)
 {
+    Vector2 player_center = Vector2Add(player.pos, player.center);
+    Vector2 enemy_center = Vector2Add(e->pos, e->center);
+    Vector2 direction = Vector2Subtract(player_center, enemy_center);
+    e->curr_speed = Vector2Scale(Vector2Normalize(direction), e->speed);
+    e->pos = Vector2Add(e->pos, e->curr_speed);
+}
+
+void MoveEnemies(ENEMY_HANDLER *eh){
+    for (int i = 0; i < MAX_ENEMIES; i++){
+        ENEMY *enemy = &eh->enemyArray[i];
+        if (!enemy->isAlive) continue;
+        
+        MoveEnemy(enemy, player.pos);
+    }
+}
+
+void SpawnEnemy(ENEMY_HANDLER *eh)
+{
+    eh->enemyArray[eh->currentIndex] = (ENEMY){
+        .pos = ZERO_VECTOR,
+        .size = {30.0f, 30.0f},
+        .center = {15.0f, 15.0f},
+        .speed = GetRandomValue(1, eh->difficulty * 2),
+        .hp = 100,
+        .color = DARKPURPLE,
+        .isAlive = true};
+    eh->currentIndex++;
+    eh->currentIndex %= MAX_ENEMIES;
+}
+
+void SpawnEnemies(ENEMY_HANDLER *eh){
+    eh->spawn_timer += GetFrameTime();
+
+    if (eh->spawn_timer > eh->curr_spawn_time)
+    {
+        SpawnEnemy(eh);
+
+        eh->spawn_timer    -= eh->curr_spawn_time;
+        eh->curr_spawn_time = eh->avg_spawn_interval + (float)GetRandomValue(-100, 100) / 100.0f * eh->variance;
+    }
+}
+
+void HandleCardThrow(CARD_HANDLER *ch){
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)){
         ch->isShooting = true;
         ch->initialMousePos = GetMousePosition();
@@ -295,55 +403,6 @@ void HandleCardThrow(CARD_HANDLER *ch)
     }
 }
 
-void ThrowCard(Vector2 origin, Vector2 speed, CARD_HANDLER *ch){
-    ch->cardArray[ch->currentCardIdx] = (CARD){
-        .pos = origin,
-        .center = (Vector2){CARD_SIZE / 2, CARD_SIZE / 2},
-        .speed = speed,
-        .size = (Vector2){CARD_SIZE, CARD_SIZE},
-        .color = RED,
-        .rotation = (float)GetRandomValue(0, 360),
-        .rotationSpeed = (float)GetRandomValue(30, 200),
-        .isAlive = true,
-        .isMoving = true};
-
-    ch->currentCardIdx += 1;
-    ch->currentCardIdx %= MAX_CARDS;
-}
-
-void MoveEnemy(ENEMY *e, Vector2 target){
-    Vector2 player_center = Vector2Add(player.pos, player.center);
-    Vector2 enemy_center = Vector2Add(e->pos, e->center);
-    Vector2 direction = Vector2Subtract(player_center, enemy_center);
-    e->curr_speed = Vector2Scale(Vector2Normalize(direction), e->speed);
-    e->pos = Vector2Add(e->pos, e->curr_speed);
-}
-
-void DrawEnemies(ENEMY_HANDLER *eh){
-    for (int i = 0; i < MAX_ENEMIES; i++){
-        ENEMY *e = &eh->enemyArray[i];
-        if(e->isAlive)
-            DrawRectangleV(e->pos, e->size, e->color);
-    }
-}
-
-void UpdateEnemies(ENEMY_HANDLER *eh){
-    eh->spawn_timer += GetFrameTime();
-
-    if (eh->spawn_timer > eh->curr_spawn_time)
-    {
-        SpawnEnemy(eh);
-
-        eh->spawn_timer    -= eh->curr_spawn_time;
-        eh->curr_spawn_time = eh->avg_spawn_interval + (float)GetRandomValue(-100, 100) / 100.0f * eh->variance;
-    }
-
-    for (int i = 0; i < MAX_ENEMIES; i++){
-        ENEMY *enemy = &eh->enemyArray[i];
-        MoveEnemy(enemy, player.pos);
-    }
-}
-
 void CheckCardEnemyCollisions(CARD_HANDLER *ch, ENEMY_HANDLER *eh)
 {
     for (int i = 0; i < MAX_CARDS; i++){
@@ -356,26 +415,16 @@ void CheckCardEnemyCollisions(CARD_HANDLER *ch, ENEMY_HANDLER *eh)
             if (!e->isAlive) continue;
 
             Rectangle enemy_rect = {e->pos.x, e->pos.y, e->size.x, e->size.y};
+
             Vector2 cardCenter = Vector2Add(c->center, c->pos);
-            if (CheckCollisionCircleRec(cardCenter, c->size.x/2*SQRT2, enemy_rect)){
+            bool isColliding = CheckCollisionCircleRec(cardCenter, c->size.x/2*SQRT2, enemy_rect);
+            if (isColliding){
                 c->isAlive = false;
-                e->isAlive = false;
+                int damage = (int)(Vector2Length(c->speed) * DMG_MULT);
+                e->hp -= damage;
                 return;
             }
         }
     }
 }
 
-void SpawnEnemy(ENEMY_HANDLER *eh){
-    eh->enemyArray[eh->currentIndex] = (ENEMY){
-        .pos = ZERO_VECTOR,
-        .size = {30.0f, 30.0f},
-        .center = {15.0f, 15.0f},
-        .speed = GetRandomValue(1, eh->difficulty*2),
-        .hp = 3,
-        .color = DARKPURPLE,
-        .isAlive = true
-    };
-    eh->currentIndex ++;
-    eh->currentIndex %= MAX_ENEMIES;
-}
