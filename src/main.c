@@ -88,14 +88,14 @@ int main(){
         logicAcc += GetFrameTime();
 
         if(logicAcc>LOGIC_FRAME_TIME){
-            UpdatePlayer(&player);
+            UpdatePlayer();
             UpdateCards(&cardHandler);
             UpdateEnemies(&enemyHandler);
             camera.target = Vector2Add(player.pos, (Vector2){PLAYER_SIZE/2, PLAYER_SIZE/2});
             logicAcc -= LOGIC_FRAME_TIME;
 
         }
-        SpawnEnemies(&enemyHandler);
+        ManageEnemySpawns(&enemyHandler);
         HandleCardThrow(&cardHandler, Vector2Add(player.pos, player.center));
         CheckCardEnemyCollisions(&cardHandler, &enemyHandler);
 
@@ -106,7 +106,7 @@ int main(){
 
             ClearBackground(DEFAULT_BG_COLOR);
             DrawCards(&cardHandler);
-            DrawPlayer(&player);
+            DrawPlayer();
             DrawEnemies(&enemyHandler);
             DrawEnemyDamage(&enemyHandler);
         EndMode2D();

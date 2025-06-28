@@ -38,4 +38,4 @@ void UpdateEnemies(ENEMY_HANDLER *eh);
 void DrawEnemies(ENEMY_HANDLER *eh);
 void DrawEnemyDamage(ENEMY_HANDLER *eh);
 void SpawnEnemy(ENEMY_HANDLER *eh);
-void SpawnEnemies(ENEMY_HANDLER *eh);
+void ManageEnemySpawns(ENEMY_HANDLER *eh);

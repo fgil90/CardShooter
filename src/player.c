@@ -10,20 +10,20 @@ PLAYER player = {
     .isMoving = false,
 };
 
-void DrawPlayer(PLAYER *p)
+void DrawPlayer()
 {
-    DrawRectangleV(p->pos, playerSize, p->color);
+    DrawRectangleV(player.pos, playerSize, player.color);
 }
 
-void UpdatePlayer(PLAYER *p)
+void UpdatePlayer()
 {
     // Move Player
     if (IsKeyDown(KEY_W))
-        p->pos.y -= p->speed;
+        player.pos.y -= player.speed;
     if (IsKeyDown(KEY_S))
-        p->pos.y += p->speed;
+        player.pos.y += player.speed;
     if (IsKeyDown(KEY_A))
-        p->pos.x -= p->speed;
+        player.pos.x -= player.speed;
     if (IsKeyDown(KEY_D))
-        p->pos.x += p->speed;
+        player.pos.x += player.speed;
 }

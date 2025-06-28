@@ -21,5 +21,5 @@ extern PLAYER player;
 
 // Player Functions
 //----------------------------------------------------------------------------------
-void UpdatePlayer(PLAYER *p);
-void DrawPlayer(PLAYER *p);
+void UpdatePlayer();
+void DrawPlayer();

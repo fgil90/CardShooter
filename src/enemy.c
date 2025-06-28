@@ -75,7 +75,7 @@ void SpawnEnemy(ENEMY_HANDLER *eh)
     eh->currentIndex %= MAX_ENEMIES;
 }
 
-void SpawnEnemies(ENEMY_HANDLER *eh) // BAD NAME
+void ManageEnemySpawns(ENEMY_HANDLER *eh) // BAD NAME
 {
     eh->spawn_timer += GetFrameTime();
 
